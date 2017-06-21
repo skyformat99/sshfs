@@ -224,6 +224,7 @@ struct sshfs {
 	int idmap;
 	int nomap;
 	int disable_hardlink;
+	int cache;
 	char *uid_file;
 	char *gid_file;
 	GHashTable *uid_map;
@@ -403,6 +404,8 @@ static struct fuse_opt sshfs_opts[] = {
 	SSHFS_OPT("delay_connect",     delay_connect, 1),
 	SSHFS_OPT("slave",             slave, 1),
 	SSHFS_OPT("disable_hardlink",  disable_hardlink, 1),
+	SSHFS_OPT("cache=yes",         cache, 1),
+	SSHFS_OPT("cache=no",          cache, 0),
 
 	FUSE_OPT_KEY("-p ",            KEY_PORT),
 	FUSE_OPT_KEY("-C",             KEY_COMPRESS),
@@ -3234,8 +3237,7 @@ static int processing_init(void)
 	return 0;
 }
 
-static struct fuse_cache_operations sshfs_oper = {
-	.oper = {
+static struct fuse_operations sshfs_oper = {
 		.init       = sshfs_init,
 		.getattr    = sshfs_getattr,
 		.access     = sshfs_access,
@@ -3266,8 +3268,6 @@ static struct fuse_cache_operations sshfs_oper = {
 		.fgetattr   = sshfs_fgetattr,
 		.flag_nullpath_ok = 1,
 		.flag_nopath = 1,
-	},
-//	.cache_readdir = sshfs_readdir,
 };
 
 static void usage(const char *progname)
@@ -3812,6 +3812,7 @@ int main(int argc, char *argv[])
 	sshfs.rfd = -1;
 	sshfs.wfd = -1;
 	sshfs.ptyfd = -1;
+	sshfs.cache = 1;
 	sshfs.ptyslavefd = -1;
 	sshfs.delay_connect = 0;
 	sshfs.slave = 0;
@@ -3837,8 +3838,8 @@ int main(int argc, char *argv[])
 
 	// These workarounds require the "path" argument.
 	if (sshfs.truncate_workaround || sshfs.fstat_workaround) {
-		sshfs_oper.oper.flag_nullpath_ok = 0;
-		sshfs_oper.oper.flag_nopath = 0;
+		sshfs_oper.flag_nullpath_ok = 0;
+		sshfs_oper.flag_nopath = 0;
 	}
 
 	if (sshfs.idmap == IDMAP_USER)
@@ -3977,9 +3978,11 @@ int main(int argc, char *argv[])
 			perror("WARNING: failed to set FD_CLOEXEC on fuse device");
 #endif
 
-		sshfs.op = cache_init(&sshfs_oper);
-		// FIXME: Bypass cache for now
-		fuse = fuse_new(ch, &args, &sshfs_oper.oper,
+		if(sshfs.cache)
+			sshfs.op = cache_init(&sshfs_oper);
+		else
+			sshfs.op = &sshfs_oper;
+		fuse = fuse_new(ch, &args, sshfs.op,
 				sizeof(struct fuse_operations), NULL);
 		if (fuse == NULL) {
 			fuse_unmount(mountpoint, ch);
